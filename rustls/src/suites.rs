@@ -1,6 +1,6 @@
 use crate::common_state::Protocol;
-use crate::crypto;
 use crate::crypto::cipher::{AeadKey, Iv};
+use crate::crypto::{self, KeyExchangeAlgorithm};
 use crate::enums::{CipherSuite, ProtocolVersion, SignatureAlgorithm, SignatureScheme};
 #[cfg(feature = "tls12")]
 use crate::tls12::Tls12CipherSuite;
@@ -115,6 +115,15 @@ impl SupportedCipherSuite {
                 .tls13()
                 .and_then(|cs| cs.quic)
                 .is_some(),
+        }
+    }
+
+    /// Return the `KeyExchangeAlgorithm` associated with the current cipher suite
+    pub(crate) fn key_exchange_algorithm(&self) -> KeyExchangeAlgorithm {
+        match self {
+            #[cfg(feature = "tls12")]
+            Self::Tls12(tls12) => tls12.kx,
+            Self::Tls13(_) => KeyExchangeAlgorithm::ECDHE,
         }
     }
 }

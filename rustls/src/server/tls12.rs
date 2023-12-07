@@ -12,7 +12,7 @@ use crate::msgs::base::Payload;
 use crate::msgs::ccs::ChangeCipherSpecPayload;
 use crate::msgs::codec::Codec;
 use crate::msgs::handshake::{
-    CertificateChain, ClientEcdhParams, HandshakeMessagePayload, HandshakePayload,
+    CertificateChain, ClientKeyExchangeParams, HandshakeMessagePayload, HandshakePayload,
 };
 use crate::msgs::handshake::{NewSessionTicketPayload, SessionId};
 use crate::msgs::message::{Message, MessagePayload};
@@ -40,13 +40,13 @@ pub(super) use client_hello::CompleteClientHelloHandling;
 mod client_hello {
     use pki_types::CertificateDer;
 
-    use crate::crypto::SupportedKxGroup;
+    use crate::crypto::{KeyExchangeAlgorithm, SupportedKxGroup};
     use crate::enums::SignatureScheme;
     use crate::msgs::enums::ECPointFormat;
     use crate::msgs::enums::{ClientCertificateType, Compression};
-    use crate::msgs::handshake::{CertificateChain, ServerEcdhParams};
+    use crate::msgs::handshake::CertificateStatus;
+    use crate::msgs::handshake::{CertificateChain, ServerKeyExchange, ServerKeyExchangeParams};
     use crate::msgs::handshake::{CertificateRequestPayload, ClientSessionTicket, Random};
-    use crate::msgs::handshake::{CertificateStatus, EcdheServerKeyExchange};
     use crate::msgs::handshake::{ClientExtension, SessionId};
     use crate::msgs::handshake::{ClientHelloPayload, ServerHelloPayload};
     use crate::msgs::handshake::{ServerExtension, ServerKeyExchangePayload};
@@ -182,7 +182,29 @@ mod client_hello {
                 .provider
                 .kx_groups
                 .iter()
+                .filter(|skxg| skxg.name().key_exchange_algorithm() == Some(self.suite.kx))
                 .find(|skxg| groups_ext.contains(&skxg.name()))
+                .or_else(|| {
+                    // If kx for the selected cipher suite is DHE and no DHE groups are specified in the extenstion,
+                    // the server is free to choose DHE params, we choose the first DHE kx group of the provider.
+                    if self.suite.kx == KeyExchangeAlgorithm::DHE
+                        && !groups_ext
+                            .iter()
+                            .any(|g| g.key_exchange_algorithm() == Some(KeyExchangeAlgorithm::DHE))
+                    {
+                        trace!("No DHE groups specified in ClientHello groups extension, server choosing DHE parameters");
+                        self.config
+                            .provider
+                            .kx_groups
+                            .iter()
+                            .find(|skxg| {
+                                skxg.name().key_exchange_algorithm()
+                                    == Some(KeyExchangeAlgorithm::DHE)
+                            })
+                    } else {
+                        None
+                    }
+                })
                 .cloned()
                 .ok_or_else(|| {
                     cx.common.send_fatal_alert(
@@ -191,6 +213,8 @@ mod client_hello {
                     )
                 })?;
 
+            // CLEANUP
+            // std::println!("server, selected kx group: {:?}", group.name());
             let ecpoint = ECPointFormat::SUPPORTED
                 .iter()
                 .find(|format| ecpoints_ext.contains(format))
@@ -420,12 +444,12 @@ mod client_hello {
         let kx = selected_group
             .start()
             .map_err(|_| Error::FailedToGetRandomBytes)?;
-        let secdh = ServerEcdhParams::new(&*kx);
+        let kx_params = ServerKeyExchangeParams::new(&*kx);
 
         let mut msg = Vec::new();
         msg.extend(randoms.client);
         msg.extend(randoms.server);
-        secdh.encode(&mut msg);
+        kx_params.encode(&mut msg);
 
         let signer = signing_key
             .choose_scheme(&sigschemes)
@@ -433,8 +457,8 @@ mod client_hello {
         let sigscheme = signer.scheme();
         let sig = signer.sign(&msg)?;
 
-        let skx = ServerKeyExchangePayload::Ecdhe(EcdheServerKeyExchange {
-            params: secdh,
+        let skx = ServerKeyExchangePayload::from(ServerKeyExchange {
+            params: kx_params,
             dss: DigitallySignedStruct::new(sigscheme, sig),
         });
 
@@ -601,11 +625,14 @@ impl State<ServerConnectionData> for ExpectClientKx {
 
         // Complete key agreement, and set up encryption with the
         // resulting premaster secret.
-        let peer_kx_params =
-            tls12::decode_ecdh_params::<ClientEcdhParams>(cx.common, &client_kx.0)?;
+        let peer_kx_params = tls12::decode_kx_params::<ClientKeyExchangeParams>(
+            cx.common,
+            &client_kx.0,
+            self.suite.kx,
+        )?;
         let secrets = ConnectionSecrets::from_key_exchange(
             self.server_kx,
-            &peer_kx_params.public.0,
+            peer_kx_params.pub_key(),
             ems_seed,
             self.randoms,
             self.suite,

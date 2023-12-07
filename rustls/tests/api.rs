@@ -272,6 +272,36 @@ fn config_builder_for_client_rejects_incompatible_cipher_suites() {
     );
 }
 
+#[cfg(feature = "tls12")]
+#[test]
+fn config_builder_for_client_rejects_cipher_suites_without_compatible_kx_groups() {
+    let bad_crypto_provider = CryptoProvider {
+        kx_groups: vec![&ffdhe::FFDHE2048_KX_GROUP],
+        cipher_suites: vec![
+            provider::cipher_suite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+            ffdhe::TLS_DHE_RSA_WITH_AES_128_GCM_SHA256,
+        ],
+        ..provider::default_provider()
+    };
+
+    assert_eq!(
+        ClientConfig::builder_with_provider(bad_crypto_provider.clone().into())
+        .with_safe_default_protocol_versions()
+        .err(),
+        Some(Error::General("Ciphersuite TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256 requires ECDHE key exchange, but no \
+                            ECDHE-compatible key exchange groups were present in `CryptoProvider`'s `kx_gropus` field".into()))
+    );
+
+    let expected_ok = ClientConfig::builder_with_provider(
+        bad_crypto_provider
+            .with_cipher_suites_without_matching_kx_removed()
+            .into(),
+    )
+    .with_safe_default_protocol_versions();
+
+    assert!(expected_ok.is_ok());
+}
+
 #[test]
 fn config_builder_for_server_rejects_empty_kx_groups() {
     assert_eq!(
@@ -2985,6 +3015,29 @@ fn negotiated_ciphersuite_client() {
     }
 }
 
+#[cfg(feature = "tls12")]
+#[test]
+fn ffdhe_ciphersuite() {
+    let client_config = finish_client_config(
+        KeyType::Rsa,
+        rustls::ClientConfig::builder_with_provider(ffdhe::ffdhe_provider().into())
+            .with_safe_default_protocol_versions()
+            .unwrap(),
+    );
+    let server_config = finish_server_config(
+        KeyType::Rsa,
+        rustls::ServerConfig::builder_with_provider(ffdhe::ffdhe_provider().into())
+            .with_safe_default_protocol_versions()
+            .unwrap(),
+    );
+    do_suite_test(
+        client_config,
+        server_config,
+        ffdhe::TLS_DHE_RSA_WITH_AES_128_GCM_SHA256,
+        ProtocolVersion::TLSv1_2,
+    );
+}
+
 #[test]
 fn negotiated_ciphersuite_server() {
     for item in TEST_CIPHERSUITES.iter() {
@@ -5032,6 +5085,42 @@ fn test_server_rejects_clients_without_any_kx_group_overlap() {
             PeerIncompatible::NoKxGroupsInCommon
         ))
     );
+}
+
+#[cfg(feature = "tls12")]
+#[test]
+fn test_server_picks_dhe_group_when_clienthello_has_no_dhe_group_in_named_groups() {
+    fn clear_named_groups_ext(msg: &mut Message) -> Altered {
+        if let MessagePayload::Handshake { parsed, encoded } = &mut msg.payload {
+            if let HandshakePayload::ClientHello(ch) = &mut parsed.payload {
+                for mut ext in ch.extensions.iter_mut() {
+                    if let ClientExtension::NamedGroups(ngs) = &mut ext {
+                        ngs.clear();
+                    }
+                }
+            }
+            *encoded = Payload::new(parsed.get_encoding());
+        }
+        Altered::InPlace
+    }
+
+    let client_config = finish_client_config(
+        KeyType::Rsa,
+        rustls::ClientConfig::builder_with_provider(Arc::new(ffdhe::ffdhe_provider()))
+            .with_protocol_versions(&[&rustls::version::TLS12])
+            .unwrap(),
+    );
+    let server_config = finish_server_config(
+        KeyType::Rsa,
+        rustls::ServerConfig::builder_with_provider(Arc::new(ffdhe::ffdhe_provider()))
+            .with_protocol_versions(&[&rustls::version::TLS12])
+            .unwrap(),
+    );
+
+    let (client, server) = make_pair_for_configs(client_config, server_config);
+    let (mut client, mut server) = (client.into(), server.into());
+    transfer_altered(&mut client, clear_named_groups_ext, &mut server);
+    assert!(server.process_new_packets().is_ok());
 }
 
 #[test]

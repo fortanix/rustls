@@ -186,6 +186,55 @@ pub struct CryptoProvider {
     pub key_provider: &'static dyn KeyProvider,
 }
 
+impl CryptoProvider {
+    fn kx_has_algo(&self, algo: KeyExchangeAlgorithm) -> bool {
+        self.kx_groups
+            .iter()
+            .any(|kx| kx.name().key_exchange_algorithm() == Some(algo))
+    }
+
+    pub(crate) fn verify_cipher_suites_have_matching_kx(&self) -> Result<(), Error> {
+        let kx_has_ecdhe = self.kx_has_algo(KeyExchangeAlgorithm::ECDHE);
+        let kx_has_dhe = self.kx_has_algo(KeyExchangeAlgorithm::DHE);
+
+        for cs in self.cipher_suites.iter() {
+            let cs_kx = cs.key_exchange_algorithm();
+            let cs_has_matching_kx = match cs_kx {
+                KeyExchangeAlgorithm::ECDHE => kx_has_ecdhe,
+                KeyExchangeAlgorithm::DHE => kx_has_dhe,
+            };
+            if !cs_has_matching_kx {
+                let suite_name = cs.common().suite;
+                return Err(Error::General(alloc::format!(
+                    "Ciphersuite {suite_name:?} requires {cs_kx:?} key exchange, but no {cs_kx:?}-compatible \
+                    key exchange groups were present in `CryptoProvider`'s `kx_gropus` field",
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    /// Removes cipher suites from this `CryptoProvider` that have no matching `SupportedKxGroup`s in `kx_groups`
+    pub fn remove_cipher_suites_without_matching_kx(&mut self) {
+        let kx_has_ecdhe = self.kx_has_algo(KeyExchangeAlgorithm::ECDHE);
+        let kx_has_dhe = self.kx_has_algo(KeyExchangeAlgorithm::DHE);
+
+        self.cipher_suites.retain(|cs| {
+            let cs_kx = cs.key_exchange_algorithm();
+            match cs_kx {
+                KeyExchangeAlgorithm::ECDHE => kx_has_ecdhe,
+                KeyExchangeAlgorithm::DHE => kx_has_dhe,
+            }
+        })
+    }
+
+    /// Removes cipher suites from this `CryptoProvider` that have no matching `SupportedKxGroup`s in `kx_groups`
+    pub fn with_cipher_suites_without_matching_kx_removed(mut self) -> Self {
+        self.remove_cipher_suites_without_matching_kx();
+        self
+    }
+}
+
 /// A source of cryptographically secure randomness.
 pub trait SecureRandom: Send + Sync + Debug {
     /// Fill the given buffer with random bytes.
