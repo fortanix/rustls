@@ -213,8 +213,6 @@ mod client_hello {
                     )
                 })?;
 
-            // CLEANUP
-            // std::println!("server, selected kx group: {:?}", group.name());
             let ecpoint = ECPointFormat::SUPPORTED
                 .iter()
                 .find(|format| ecpoints_ext.contains(format))
