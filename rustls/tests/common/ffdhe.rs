@@ -29,8 +29,10 @@ static TLS12_DHE_RSA_WITH_AES_128_GCM_SHA256: Tls12CipherSuite =
 pub static TLS_DHE_RSA_WITH_AES_128_GCM_SHA256: SupportedCipherSuite =
     SupportedCipherSuite::Tls12(&TLS12_DHE_RSA_WITH_AES_128_GCM_SHA256);
 
-static FFDHE_CIPHER_SUITES: &[rustls::SupportedCipherSuite] =
-    &[TLS_DHE_RSA_WITH_AES_128_GCM_SHA256];
+static FFDHE_CIPHER_SUITES: &[rustls::SupportedCipherSuite] = &[
+    TLS_DHE_RSA_WITH_AES_128_GCM_SHA256,
+    provider::cipher_suite::TLS13_CHACHA20_POLY1305_SHA256,
+];
 
 #[derive(Debug)]
 pub struct FfdheKxGroup(NamedGroup);
@@ -93,9 +95,6 @@ pub fn ffdhe_provider() -> CryptoProvider {
     CryptoProvider {
         cipher_suites: FFDHE_CIPHER_SUITES.to_vec(),
         kx_groups: FFDHE_KX_GROUPS.to_vec(),
-        signature_verification_algorithms: provider::default_provider()
-            .signature_verification_algorithms,
-        secure_random: provider::default_provider().secure_random,
-        key_provider: provider::default_provider().key_provider,
+        ..provider::default_provider()
     }
 }

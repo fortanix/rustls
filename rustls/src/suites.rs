@@ -9,6 +9,7 @@ use crate::tls13::Tls13CipherSuite;
 use crate::versions::TLS12;
 use crate::versions::{SupportedProtocolVersion, TLS13};
 
+use alloc::collections::BTreeSet;
 use alloc::vec::Vec;
 use core::fmt;
 
@@ -119,11 +120,11 @@ impl SupportedCipherSuite {
     }
 
     /// Return the `KeyExchangeAlgorithm` associated with the current cipher suite
-    pub(crate) fn key_exchange_algorithm(&self) -> KeyExchangeAlgorithm {
+    pub(crate) fn key_exchange_algorithms(&self) -> BTreeSet<KeyExchangeAlgorithm> {
         match self {
             #[cfg(feature = "tls12")]
-            Self::Tls12(tls12) => tls12.kx,
-            Self::Tls13(_) => KeyExchangeAlgorithm::ECDHE,
+            Self::Tls12(tls12) => [tls12.kx].into(),
+            Self::Tls13(_) => [KeyExchangeAlgorithm::ECDHE, KeyExchangeAlgorithm::DHE].into(),
         }
     }
 }

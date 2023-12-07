@@ -3,6 +3,7 @@ use crate::suites;
 use crate::{Error, NamedGroup};
 
 use alloc::boxed::Box;
+use alloc::collections::BTreeSet;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::fmt::Debug;
@@ -187,23 +188,20 @@ pub struct CryptoProvider {
 }
 
 impl CryptoProvider {
-    fn kx_has_algo(&self, algo: KeyExchangeAlgorithm) -> bool {
+    fn supported_kx_algos(&self) -> BTreeSet<KeyExchangeAlgorithm> {
         self.kx_groups
             .iter()
-            .any(|kx| kx.name().key_exchange_algorithm() == Some(algo))
+            .filter_map(|kx| kx.name().key_exchange_algorithm())
+            .collect()
     }
 
     pub(crate) fn verify_cipher_suites_have_matching_kx(&self) -> Result<(), Error> {
-        let kx_has_ecdhe = self.kx_has_algo(KeyExchangeAlgorithm::ECDHE);
-        let kx_has_dhe = self.kx_has_algo(KeyExchangeAlgorithm::DHE);
+        let kx_algos = self.supported_kx_algos();
 
         for cs in self.cipher_suites.iter() {
-            let cs_kx = cs.key_exchange_algorithm();
-            let cs_has_matching_kx = match cs_kx {
-                KeyExchangeAlgorithm::ECDHE => kx_has_ecdhe,
-                KeyExchangeAlgorithm::DHE => kx_has_dhe,
-            };
-            if !cs_has_matching_kx {
+            let cs_kx = cs.key_exchange_algorithms();
+            if cs_kx.is_disjoint(&kx_algos) {
+                let cs_kx = cs.key_exchange_algorithms();
                 let suite_name = cs.common().suite;
                 return Err(Error::General(alloc::format!(
                     "Ciphersuite {suite_name:?} requires {cs_kx:?} key exchange, but no {cs_kx:?}-compatible \
@@ -216,15 +214,11 @@ impl CryptoProvider {
 
     /// Removes cipher suites from this `CryptoProvider` that have no matching `SupportedKxGroup`s in `kx_groups`
     pub fn remove_cipher_suites_without_matching_kx(&mut self) {
-        let kx_has_ecdhe = self.kx_has_algo(KeyExchangeAlgorithm::ECDHE);
-        let kx_has_dhe = self.kx_has_algo(KeyExchangeAlgorithm::DHE);
+        let kx_algos = self.supported_kx_algos();
 
         self.cipher_suites.retain(|cs| {
-            let cs_kx = cs.key_exchange_algorithm();
-            match cs_kx {
-                KeyExchangeAlgorithm::ECDHE => kx_has_ecdhe,
-                KeyExchangeAlgorithm::DHE => kx_has_dhe,
-            }
+            let cs_kx = cs.key_exchange_algorithms();
+            !cs_kx.is_disjoint(&kx_algos)
         })
     }
 

@@ -288,8 +288,8 @@ fn config_builder_for_client_rejects_cipher_suites_without_compatible_kx_groups(
         ClientConfig::builder_with_provider(bad_crypto_provider.clone().into())
         .with_safe_default_protocol_versions()
         .err(),
-        Some(Error::General("Ciphersuite TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256 requires ECDHE key exchange, but no \
-                            ECDHE-compatible key exchange groups were present in `CryptoProvider`'s `kx_gropus` field".into()))
+        Some(Error::General("Ciphersuite TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256 requires {ECDHE} key exchange, but no \
+                            {ECDHE}-compatible key exchange groups were present in `CryptoProvider`'s `kx_gropus` field".into()))
     );
 
     let expected_ok = ClientConfig::builder_with_provider(
@@ -3018,24 +3018,35 @@ fn negotiated_ciphersuite_client() {
 #[cfg(feature = "tls12")]
 #[test]
 fn ffdhe_ciphersuite() {
-    let client_config = finish_client_config(
-        KeyType::Rsa,
-        rustls::ClientConfig::builder_with_provider(ffdhe::ffdhe_provider().into())
-            .with_safe_default_protocol_versions()
-            .unwrap(),
-    );
-    let server_config = finish_server_config(
-        KeyType::Rsa,
-        rustls::ServerConfig::builder_with_provider(ffdhe::ffdhe_provider().into())
-            .with_safe_default_protocol_versions()
-            .unwrap(),
-    );
-    do_suite_test(
-        client_config,
-        server_config,
-        ffdhe::TLS_DHE_RSA_WITH_AES_128_GCM_SHA256,
-        ProtocolVersion::TLSv1_2,
-    );
+    use provider::cipher_suite;
+    use rustls::version::{TLS12, TLS13};
+
+    let test_cases = [
+        (&TLS12, ffdhe::TLS_DHE_RSA_WITH_AES_128_GCM_SHA256),
+        (&TLS13, cipher_suite::TLS13_CHACHA20_POLY1305_SHA256),
+    ];
+
+    for (expected_procol, expected_cipher_suite) in test_cases {
+        let client_config = finish_client_config(
+            KeyType::Rsa,
+            rustls::ClientConfig::builder_with_provider(ffdhe::ffdhe_provider().into())
+                .with_protocol_versions(&[expected_procol])
+                // .with_safe_default_protocol_versions()
+                .unwrap(),
+        );
+        let server_config = finish_server_config(
+            KeyType::Rsa,
+            rustls::ServerConfig::builder_with_provider(ffdhe::ffdhe_provider().into())
+                .with_safe_default_protocol_versions()
+                .unwrap(),
+        );
+        do_suite_test(
+            client_config,
+            server_config,
+            expected_cipher_suite,
+            expected_procol.version,
+        );
+    }
 }
 
 #[test]
