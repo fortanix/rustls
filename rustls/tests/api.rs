@@ -288,8 +288,8 @@ fn config_builder_for_client_rejects_cipher_suites_without_compatible_kx_groups(
         ClientConfig::builder_with_provider(bad_crypto_provider.clone().into())
         .with_safe_default_protocol_versions()
         .err(),
-        Some(Error::General("Ciphersuite TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256 requires {ECDHE} key exchange, but no \
-                            {ECDHE}-compatible key exchange groups were present in `CryptoProvider`'s `kx_gropus` field".into()))
+        Some(Error::General("Ciphersuite TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256 requires [ECDHE] key exchange, but no \
+                            [ECDHE]-compatible key exchange groups were present in `CryptoProvider`'s `kx_gropus` field".into()))
     );
 
     let expected_ok = ClientConfig::builder_with_provider(

@@ -1478,7 +1478,7 @@ impl CertificatePayloadTls13 {
 }
 
 /// Describes supported key exchange mechanisms.
-#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Eq, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 #[non_exhaustive]
 pub enum KeyExchangeAlgorithm {
     /// Key exchange performed via elliptic curve Diffie-Hellman.
@@ -1486,6 +1486,9 @@ pub enum KeyExchangeAlgorithm {
     /// Finite-field Diffie-Hellman Key exchange
     DHE,
 }
+
+pub(crate) static ALL_KEY_EXCHANGE_ALGORITHMS: &[KeyExchangeAlgorithm] =
+    &[KeyExchangeAlgorithm::ECDHE, KeyExchangeAlgorithm::DHE];
 
 // We don't support arbitrary curves.  It's a terrible
 // idea and unnecessary attack surface.  Please,

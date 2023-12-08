@@ -1,9 +1,9 @@
+use crate::msgs::handshake::ALL_KEY_EXCHANGE_ALGORITHMS;
 use crate::sign::SigningKey;
 use crate::suites;
 use crate::{Error, NamedGroup};
 
 use alloc::boxed::Box;
-use alloc::collections::BTreeSet;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::fmt::Debug;
@@ -188,11 +188,21 @@ pub struct CryptoProvider {
 }
 
 impl CryptoProvider {
-    fn supported_kx_algos(&self) -> BTreeSet<KeyExchangeAlgorithm> {
-        self.kx_groups
+    fn supported_kx_algos(&self) -> Vec<KeyExchangeAlgorithm> {
+        let mut res = Vec::with_capacity(ALL_KEY_EXCHANGE_ALGORITHMS.len());
+        for kx in self
+            .kx_groups
             .iter()
             .filter_map(|kx| kx.name().key_exchange_algorithm())
-            .collect()
+        {
+            if !res.contains(&kx) {
+                res.push(kx);
+            }
+            if res.len() == ALL_KEY_EXCHANGE_ALGORITHMS.len() {
+                break;
+            }
+        }
+        res
     }
 
     pub(crate) fn verify_cipher_suites_have_matching_kx(&self) -> Result<(), Error> {
@@ -200,8 +210,10 @@ impl CryptoProvider {
 
         for cs in self.cipher_suites.iter() {
             let cs_kx = cs.key_exchange_algorithms();
-            if cs_kx.is_disjoint(&kx_algos) {
-                let cs_kx = cs.key_exchange_algorithms();
+            if !cs_kx
+                .iter()
+                .any(|kx| kx_algos.contains(kx))
+            {
                 let suite_name = cs.common().suite;
                 return Err(Error::General(alloc::format!(
                     "Ciphersuite {suite_name:?} requires {cs_kx:?} key exchange, but no {cs_kx:?}-compatible \
@@ -218,7 +230,9 @@ impl CryptoProvider {
 
         self.cipher_suites.retain(|cs| {
             let cs_kx = cs.key_exchange_algorithms();
-            !cs_kx.is_disjoint(&kx_algos)
+            cs_kx
+                .iter()
+                .any(|kx| kx_algos.contains(kx))
         })
     }
 

@@ -213,6 +213,7 @@ mod client_hello {
                     )
                 })?;
 
+            // TODO (arash) needed for ffdhe?
             let ecpoint = ECPointFormat::SUPPORTED
                 .iter()
                 .find(|format| ecpoints_ext.contains(format))
