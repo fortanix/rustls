@@ -83,27 +83,29 @@ mod client_hello {
                 self.using_ems = true;
             }
 
-            let groups_ext = client_hello
-                .get_namedgroups_extension()
-                .ok_or_else(|| {
-                    cx.common.send_fatal_alert(
-                        AlertDescription::HandshakeFailure,
-                        PeerIncompatible::NamedGroupsExtensionRequired,
-                    )
-                })?;
-            let ecpoints_ext = client_hello
-                .get_ecpoints_extension()
-                .ok_or_else(|| {
-                    cx.common.send_fatal_alert(
-                        AlertDescription::HandshakeFailure,
-                        PeerIncompatible::EcPointsExtensionRequired,
-                    )
-                })?;
+            let groups_ext = client_hello.get_namedgroups_extension();
+
+            if groups_ext.is_none() && self.suite.kx == KeyExchangeAlgorithm::ECDHE {
+                return Err(cx.common.send_fatal_alert(
+                    AlertDescription::HandshakeFailure,
+                    PeerIncompatible::NamedGroupsExtensionRequired,
+                ));
+            }
+            let ecpoints_ext = client_hello.get_ecpoints_extension();
+
+            // TODO: according to the ECC RFC, sending this extension is not required
+            // https://datatracker.ietf.org/doc/html/rfc8422#section-5.1.2
+            if ecpoints_ext.is_none() && self.suite.kx == KeyExchangeAlgorithm::ECDHE {
+                return Err(cx.common.send_fatal_alert(
+                    AlertDescription::HandshakeFailure,
+                    PeerIncompatible::EcPointsExtensionRequired,
+                ));
+            }
 
             trace!("namedgroups {:?}", groups_ext);
             trace!("ecpoints {:?}", ecpoints_ext);
 
-            if !ecpoints_ext.contains(&ECPointFormat::Uncompressed) {
+            if ecpoints_ext.map_or(false, |ext| !ext.contains(&ECPointFormat::Uncompressed)) {
                 return Err(cx.common.send_fatal_alert(
                     AlertDescription::IllegalParameter,
                     PeerIncompatible::UncompressedEcPointsRequired,
@@ -177,18 +179,19 @@ mod client_hello {
                 ));
             }
 
+            let groups_ext_or_default = groups_ext.unwrap_or(&[]);
             let group = self
                 .config
                 .provider
                 .kx_groups
                 .iter()
                 .filter(|skxg| skxg.name().key_exchange_algorithm() == Some(self.suite.kx))
-                .find(|skxg| groups_ext.contains(&skxg.name()))
+                .find(|skxg| groups_ext_or_default.contains(&skxg.name()))
                 .or_else(|| {
                     // If kx for the selected cipher suite is DHE and no DHE groups are specified in the extenstion,
                     // the server is free to choose DHE params, we choose the first DHE kx group of the provider.
                     if self.suite.kx == KeyExchangeAlgorithm::DHE
-                        && !groups_ext
+                        && !groups_ext_or_default
                             .iter()
                             .any(|g| g.key_exchange_algorithm() == Some(KeyExchangeAlgorithm::DHE))
                     {
@@ -213,10 +216,10 @@ mod client_hello {
                     )
                 })?;
 
-            // TODO (arash) needed for ffdhe?
+            let ecpoints_ext_or_default = ecpoints_ext.unwrap_or(&[ECPointFormat::Uncompressed]);
             let ecpoint = ECPointFormat::SUPPORTED
                 .iter()
-                .find(|format| ecpoints_ext.contains(format))
+                .find(|format| ecpoints_ext_or_default.contains(format))
                 .cloned()
                 .ok_or_else(|| {
                     cx.common.send_fatal_alert(
