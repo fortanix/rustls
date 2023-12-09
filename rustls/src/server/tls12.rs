@@ -105,7 +105,11 @@ mod client_hello {
             trace!("namedgroups {:?}", groups_ext);
             trace!("ecpoints {:?}", ecpoints_ext);
 
-            if ecpoints_ext.map_or(false, |ext| !ext.contains(&ECPointFormat::Uncompressed)) {
+            // https://datatracker.ietf.org/doc/html/rfc8422#section-5.1.2 specifies that if this
+            // extension is missing, it means that only the uncompressed point format is supported.
+            let ecpoints_ext_or_default = ecpoints_ext.unwrap_or(&[ECPointFormat::Uncompressed]);
+
+            if !ecpoints_ext_or_default.contains(&ECPointFormat::Uncompressed) {
                 return Err(cx.common.send_fatal_alert(
                     AlertDescription::IllegalParameter,
                     PeerIncompatible::UncompressedEcPointsRequired,
@@ -216,7 +220,6 @@ mod client_hello {
                     )
                 })?;
 
-            let ecpoints_ext_or_default = ecpoints_ext.unwrap_or(&[ECPointFormat::Uncompressed]);
             let ecpoint = ECPointFormat::SUPPORTED
                 .iter()
                 .find(|format| ecpoints_ext_or_default.contains(format))
