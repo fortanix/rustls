@@ -3031,7 +3031,6 @@ fn ffdhe_ciphersuite() {
             KeyType::Rsa,
             rustls::ClientConfig::builder_with_provider(ffdhe::ffdhe_provider().into())
                 .with_protocol_versions(&[expected_procol])
-                // .with_safe_default_protocol_versions()
                 .unwrap(),
         );
         let server_config = finish_server_config(
@@ -5100,7 +5099,7 @@ fn test_server_rejects_clients_without_any_kx_group_overlap() {
 
 #[cfg(feature = "tls12")]
 #[test]
-fn test_server_picks_dhe_group_when_clienthello_has_no_dhe_group_in_named_groups() {
+fn test_server_picks_dhe_group_when_clienthello_has_no_dhe_group_in_groups_ext() {
     fn clear_named_groups_ext(msg: &mut Message) -> Altered {
         if let MessagePayload::Handshake { parsed, encoded } = &mut msg.payload {
             if let HandshakePayload::ClientHello(ch) = &mut parsed.payload {
@@ -5132,6 +5131,60 @@ fn test_server_picks_dhe_group_when_clienthello_has_no_dhe_group_in_named_groups
     let (mut client, mut server) = (client.into(), server.into());
     transfer_altered(&mut client, clear_named_groups_ext, &mut server);
     assert!(server.process_new_packets().is_ok());
+}
+
+#[cfg(feature = "tls12")]
+#[test]
+fn test_server_avoids_dhe_cipher_suites_when_client_has_no_known_dhe_in_groups_ext() {
+    use rustls::NamedGroup;
+
+    let client_config = finish_client_config(
+        KeyType::Rsa,
+        rustls::ClientConfig::builder_with_provider(
+            CryptoProvider {
+                cipher_suites: vec![
+                    ffdhe::TLS_DHE_RSA_WITH_AES_128_GCM_SHA256,
+                    provider::cipher_suite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+                ],
+                kx_groups: vec![
+                    &ffdhe::FfdheKxGroup(NamedGroup::FFDHE4096),
+                    provider::kx_group::SECP256R1,
+                ],
+                ..provider::default_provider()
+            }
+            .into(),
+        )
+        .with_safe_default_protocol_versions()
+        .unwrap(),
+    );
+
+    let server_config = finish_server_config(
+        KeyType::Rsa,
+        rustls::ServerConfig::builder_with_provider(
+            CryptoProvider {
+                cipher_suites: vec![
+                    ffdhe::TLS_DHE_RSA_WITH_AES_128_GCM_SHA256,
+                    provider::cipher_suite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+                ],
+                kx_groups: vec![&ffdhe::FFDHE2048_KX_GROUP, provider::kx_group::SECP256R1],
+                ..provider::default_provider()
+            }
+            .into(),
+        )
+        .with_safe_default_protocol_versions()
+        .unwrap(),
+    );
+
+    let (mut client, mut server) = make_pair_for_configs(client_config, server_config);
+    transfer(&mut client, &mut server);
+    assert!(server.process_new_packets().is_ok());
+    assert_eq!(
+        server
+            .negotiated_cipher_suite()
+            .unwrap()
+            .suite(),
+        CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+    );
 }
 
 #[test]

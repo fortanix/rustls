@@ -205,6 +205,13 @@ impl CryptoProvider {
         res
     }
 
+    pub(crate) fn supported_kx_group_names(&self) -> Vec<NamedGroup> {
+        self.kx_groups
+            .iter()
+            .map(|skxg| skxg.name())
+            .collect::<Vec<_>>()
+    }
+
     pub(crate) fn verify_cipher_suites_have_matching_kx(&self) -> Result<(), Error> {
         let kx_algos = self.supported_kx_algos();
 

@@ -1483,7 +1483,9 @@ impl CertificatePayloadTls13 {
 pub enum KeyExchangeAlgorithm {
     /// Key exchange performed via elliptic curve Diffie-Hellman.
     ECDHE,
-    /// Finite-field Diffie-Hellman Key exchange
+    /// Diffie-Hellman Key exchange (with only known parameters as defined in [RFC 7919]).
+    ///
+    /// [RFC 7919]: https://datatracker.ietf.org/doc/html/rfc7919
     DHE,
 }
 

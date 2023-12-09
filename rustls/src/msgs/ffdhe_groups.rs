@@ -36,6 +36,9 @@ impl<'a> FfdheGroup<'a> {
     }
 }
 
+/// FFDHE2048 group defined in [RFC 7919 Appendix A.1]
+///
+/// [RFC 7919 Appendix A.1]: https://datatracker.ietf.org/doc/html/rfc7919#appendix-A.1
 pub const FFDHE2048: FfdheGroup = FfdheGroup {
     p: &[
         0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xAD, 0xF8, 0x54, 0x58, 0xA2, 0xBB, 0x4A,
@@ -60,6 +63,9 @@ pub const FFDHE2048: FfdheGroup = FfdheGroup {
     g: &[2],
 };
 
+/// FFDHE3072 group defined in [RFC 7919 Appendix A.2]
+///
+/// [RFC 7919 Appendix A.2]: https://datatracker.ietf.org/doc/html/rfc7919#appendix-A.2
 pub const FFDHE3072: FfdheGroup = FfdheGroup {
     p: &[
         0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xAD, 0xF8, 0x54, 0x58, 0xA2, 0xBB, 0x4A,
@@ -92,6 +98,9 @@ pub const FFDHE3072: FfdheGroup = FfdheGroup {
     g: &[2],
 };
 
+/// FFDHE4096 group defined in [RFC 7919 Appendix A.3]
+///
+/// [RFC 7919 Appendix A.3]: https://datatracker.ietf.org/doc/html/rfc7919#appendix-A.3
 pub const FFDHE4096: FfdheGroup = FfdheGroup {
     p: &[
         0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xAD, 0xF8, 0x54, 0x58, 0xA2, 0xBB, 0x4A,
@@ -133,6 +142,9 @@ pub const FFDHE4096: FfdheGroup = FfdheGroup {
     g: &[2],
 };
 
+/// FFDHE6144 group defined in [RFC 7919 Appendix A.4]
+///
+/// [RFC 7919 Appendix A.4]: https://datatracker.ietf.org/doc/html/rfc7919#appendix-A.4
 pub const FFDHE6144: FfdheGroup = FfdheGroup {
     p: &[
         0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xAD, 0xF8, 0x54, 0x58, 0xA2, 0xBB, 0x4A,
@@ -191,6 +203,9 @@ pub const FFDHE6144: FfdheGroup = FfdheGroup {
     g: &[2],
 };
 
+/// FFDHE8192 group defined in [RFC 7919 Appendix A.5]
+///
+/// [RFC 7919 Appendix A.5]: https://datatracker.ietf.org/doc/html/rfc7919#appendix-A.5
 pub const FFDHE8192: FfdheGroup = FfdheGroup {
     p: &[
         0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xAD, 0xF8, 0x54, 0x58, 0xA2, 0xBB, 0x4A,

@@ -35,7 +35,7 @@ static FFDHE_CIPHER_SUITES: &[rustls::SupportedCipherSuite] = &[
 ];
 
 #[derive(Debug)]
-pub struct FfdheKxGroup(NamedGroup);
+pub struct FfdheKxGroup(pub NamedGroup);
 
 impl SupportedKxGroup for FfdheKxGroup {
     fn start(&self) -> Result<Box<dyn crypto::ActiveKeyExchange>, rustls::Error> {

@@ -390,6 +390,7 @@ impl State<ClientConnectionData> for ExpectServerKx {
         // Save the signature and signed parameters for later verification.
         let mut kx_params = Vec::new();
         kx.params.encode(&mut kx_params);
+        let server_kx = ServerKxDetails::new(kx_params, kx.dss);
 
         #[cfg_attr(not(feature = "logging"), allow(unused_variables))]
         {
@@ -402,8 +403,6 @@ impl State<ClientConnectionData> for ExpectServerKx {
                 }
             }
         }
-
-        let server_kx = ServerKxDetails::new(kx_params, kx.dss);
 
         Ok(Box::new(ExpectServerDoneOrCertReq {
             config: self.config,

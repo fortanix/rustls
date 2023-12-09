@@ -197,7 +197,7 @@ enum_builder! {
 }
 
 impl NamedGroup {
-    /// Return the known key exchange algorithm associated with the `NamedGroup`
+    /// Return the **known** key exchange algorithm associated with the `NamedGroup`
     pub fn key_exchange_algorithm(&self) -> Option<KeyExchangeAlgorithm> {
         match self {
             Self::secp256r1 | Self::secp384r1 | Self::secp521r1 | Self::X25519 | Self::X448 => {
