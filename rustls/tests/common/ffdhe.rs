@@ -1,8 +1,10 @@
+use num_bigint::BigUint;
 use rustls::{
     crypto::{
-        self, ActiveKeyExchange, CipherSuiteCommon, CryptoProvider, KeyExchangeAlgorithm,
+        ActiveKeyExchange, CipherSuiteCommon, CryptoProvider, KeyExchangeAlgorithm, SharedSecret,
         SupportedKxGroup,
     },
+    ffdhe_groups::FfdheGroup,
     CipherSuite, NamedGroup, SupportedCipherSuite, Tls12CipherSuite,
 };
 
@@ -13,14 +15,10 @@ static TLS12_DHE_RSA_WITH_AES_128_GCM_SHA256: Tls12CipherSuite =
         SupportedCipherSuite::Tls12(provider) => Tls12CipherSuite {
             common: CipherSuiteCommon {
                 suite: CipherSuite::TLS_DHE_RSA_WITH_AES_128_GCM_SHA256,
-                hash_provider: provider.common.hash_provider,
-                confidentiality_limit: 1 << 23,
-                integrity_limit: 1 << 52,
+                ..provider.common
             },
             kx: KeyExchangeAlgorithm::DHE,
-            sign: provider.sign,
-            aead_alg: provider.aead_alg,
-            prf_provider: provider.prf_provider,
+            ..**provider
         },
         _ => unreachable!(),
     };
@@ -38,16 +36,19 @@ static FFDHE_CIPHER_SUITES: &[rustls::SupportedCipherSuite] = &[
 pub struct FfdheKxGroup(pub NamedGroup);
 
 impl SupportedKxGroup for FfdheKxGroup {
-    fn start(&self) -> Result<Box<dyn crypto::ActiveKeyExchange>, rustls::Error> {
+    fn start(&self) -> Result<Box<dyn ActiveKeyExchange>, rustls::Error> {
         let mut x = vec![0; 64];
         ffdhe_provider()
             .secure_random
             .fill(&mut x)?;
-        let group = rustls::ffdhe_groups::FfdheGroup::from_named_group(self.0).unwrap();
-        let x = num_bigint::BigUint::from_bytes_be(&x);
-        let p = num_bigint::BigUint::from_bytes_be(group.p);
-        let g = num_bigint::BigUint::from_bytes_be(group.g);
+        let x = BigUint::from_bytes_be(&x);
+
+        let group = FfdheGroup::from_named_group(self.0).unwrap();
+        let p = BigUint::from_bytes_be(group.p);
+        let g = BigUint::from_bytes_be(group.g);
+
         let x_pub = g.modpow(&x, &p);
+
         Ok(Box::new(ActiveFfdheKx {
             x_pub: x_pub.to_bytes_be(),
             x,
@@ -56,43 +57,40 @@ impl SupportedKxGroup for FfdheKxGroup {
         }))
     }
 
-    fn name(&self) -> rustls::NamedGroup {
+    fn name(&self) -> NamedGroup {
         self.0
     }
 }
 
 struct ActiveFfdheKx {
     x_pub: Vec<u8>,
-    x: num_bigint::BigUint,
-    p: num_bigint::BigUint,
+    x: BigUint,
+    p: BigUint,
     group: NamedGroup,
 }
 
 impl ActiveKeyExchange for ActiveFfdheKx {
-    fn complete(
-        self: Box<Self>,
-        peer_pub_key: &[u8],
-    ) -> Result<crypto::SharedSecret, rustls::Error> {
-        let peer_pub = num_bigint::BigUint::from_bytes_be(peer_pub_key);
+    fn complete(self: Box<Self>, peer_pub_key: &[u8]) -> Result<SharedSecret, rustls::Error> {
+        let peer_pub = BigUint::from_bytes_be(peer_pub_key);
         let secret = peer_pub.modpow(&self.x, &self.p);
 
-        Ok(crypto::SharedSecret::from(&secret.to_bytes_be()[..]))
+        Ok(SharedSecret::from(&secret.to_bytes_be()[..]))
     }
 
     fn pub_key(&self) -> &[u8] {
         &self.x_pub
     }
 
-    fn group(&self) -> rustls::NamedGroup {
+    fn group(&self) -> NamedGroup {
         self.group
     }
 }
 
 pub const FFDHE2048_KX_GROUP: FfdheKxGroup = FfdheKxGroup(NamedGroup::FFDHE2048);
 pub const FFDHE3072_KX_GROUP: FfdheKxGroup = FfdheKxGroup(NamedGroup::FFDHE3072);
-static FFDHE_KX_GROUPS: &[&dyn rustls::crypto::SupportedKxGroup] =
-    &[&FFDHE2048_KX_GROUP, &FFDHE3072_KX_GROUP];
+static FFDHE_KX_GROUPS: &[&dyn SupportedKxGroup] = &[&FFDHE2048_KX_GROUP, &FFDHE3072_KX_GROUP];
 
+/// A test-only `CryptoProvider`, only supporting FFDHE key exchange
 pub fn ffdhe_provider() -> CryptoProvider {
     CryptoProvider {
         cipher_suites: FFDHE_CIPHER_SUITES.to_vec(),

@@ -3015,39 +3015,6 @@ fn negotiated_ciphersuite_client() {
     }
 }
 
-#[cfg(feature = "tls12")]
-#[test]
-fn ffdhe_ciphersuite() {
-    use provider::cipher_suite;
-    use rustls::version::{TLS12, TLS13};
-
-    let test_cases = [
-        (&TLS12, ffdhe::TLS_DHE_RSA_WITH_AES_128_GCM_SHA256),
-        (&TLS13, cipher_suite::TLS13_CHACHA20_POLY1305_SHA256),
-    ];
-
-    for (expected_procol, expected_cipher_suite) in test_cases {
-        let client_config = finish_client_config(
-            KeyType::Rsa,
-            rustls::ClientConfig::builder_with_provider(ffdhe::ffdhe_provider().into())
-                .with_protocol_versions(&[expected_procol])
-                .unwrap(),
-        );
-        let server_config = finish_server_config(
-            KeyType::Rsa,
-            rustls::ServerConfig::builder_with_provider(ffdhe::ffdhe_provider().into())
-                .with_safe_default_protocol_versions()
-                .unwrap(),
-        );
-        do_suite_test(
-            client_config,
-            server_config,
-            expected_cipher_suite,
-            expected_procol.version,
-        );
-    }
-}
-
 #[test]
 fn negotiated_ciphersuite_server() {
     for item in TEST_CIPHERSUITES.iter() {
@@ -3067,6 +3034,39 @@ fn negotiated_ciphersuite_server() {
         );
 
         do_suite_test(make_client_config(kt), server_config, scs, version.version);
+    }
+}
+
+#[cfg(feature = "tls12")]
+#[test]
+fn ffdhe_ciphersuite() {
+    use provider::cipher_suite;
+    use rustls::version::{TLS12, TLS13};
+
+    let test_cases = [
+        (&TLS12, ffdhe::TLS_DHE_RSA_WITH_AES_128_GCM_SHA256),
+        (&TLS13, cipher_suite::TLS13_CHACHA20_POLY1305_SHA256),
+    ];
+
+    for (expected_protocol, expected_cipher_suite) in test_cases {
+        let client_config = finish_client_config(
+            KeyType::Rsa,
+            rustls::ClientConfig::builder_with_provider(ffdhe::ffdhe_provider().into())
+                .with_protocol_versions(&[expected_protocol])
+                .unwrap(),
+        );
+        let server_config = finish_server_config(
+            KeyType::Rsa,
+            rustls::ServerConfig::builder_with_provider(ffdhe::ffdhe_provider().into())
+                .with_safe_default_protocol_versions()
+                .unwrap(),
+        );
+        do_suite_test(
+            client_config,
+            server_config,
+            expected_cipher_suite,
+            expected_protocol.version,
+        );
     }
 }
 
@@ -5116,13 +5116,13 @@ fn test_server_picks_dhe_group_when_clienthello_has_no_dhe_group_in_groups_ext()
 
     let client_config = finish_client_config(
         KeyType::Rsa,
-        rustls::ClientConfig::builder_with_provider(Arc::new(ffdhe::ffdhe_provider()))
+        rustls::ClientConfig::builder_with_provider(ffdhe::ffdhe_provider().into())
             .with_protocol_versions(&[&rustls::version::TLS12])
             .unwrap(),
     );
     let server_config = finish_server_config(
         KeyType::Rsa,
-        rustls::ServerConfig::builder_with_provider(Arc::new(ffdhe::ffdhe_provider()))
+        rustls::ServerConfig::builder_with_provider(ffdhe::ffdhe_provider().into())
             .with_protocol_versions(&[&rustls::version::TLS12])
             .unwrap(),
     );
@@ -5149,13 +5149,13 @@ fn test_server_picks_dhe_group_when_clienthello_has_no_groups_ext() {
 
     let client_config = finish_client_config(
         KeyType::Rsa,
-        rustls::ClientConfig::builder_with_provider(Arc::new(ffdhe::ffdhe_provider()))
+        rustls::ClientConfig::builder_with_provider(ffdhe::ffdhe_provider().into())
             .with_protocol_versions(&[&rustls::version::TLS12])
             .unwrap(),
     );
     let server_config = finish_server_config(
         KeyType::Rsa,
-        rustls::ServerConfig::builder_with_provider(Arc::new(ffdhe::ffdhe_provider()))
+        rustls::ServerConfig::builder_with_provider(ffdhe::ffdhe_provider().into())
             .with_protocol_versions(&[&rustls::version::TLS12])
             .unwrap(),
     );
@@ -5236,13 +5236,13 @@ fn test_server_accepts_client_with_no_ecpoints_extension_and_only_ffdhe_cipher_s
 
     let client_config = finish_client_config(
         KeyType::Rsa,
-        rustls::ClientConfig::builder_with_provider(Arc::new(ffdhe::ffdhe_provider()))
+        rustls::ClientConfig::builder_with_provider(ffdhe::ffdhe_provider().into())
             .with_protocol_versions(&[&rustls::version::TLS12])
             .unwrap(),
     );
     let server_config = finish_server_config(
         KeyType::Rsa,
-        rustls::ServerConfig::builder_with_provider(Arc::new(ffdhe::ffdhe_provider()))
+        rustls::ServerConfig::builder_with_provider(ffdhe::ffdhe_provider().into())
             .with_safe_default_protocol_versions()
             .unwrap(),
     );
@@ -5256,6 +5256,8 @@ fn test_server_accepts_client_with_no_ecpoints_extension_and_only_ffdhe_cipher_s
 #[cfg(feature = "tls12")]
 #[test]
 fn test_server_avoids_cipher_suite_with_no_common_kx_groups() {
+    use rustls::version::{TLS12, TLS13};
+
     let server_config = finish_server_config(
         KeyType::Rsa,
         rustls::ServerConfig::builder_with_provider(
@@ -5263,13 +5265,14 @@ fn test_server_avoids_cipher_suite_with_no_common_kx_groups() {
                 cipher_suites: vec![
                     provider::cipher_suite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
                     ffdhe::TLS_DHE_RSA_WITH_AES_128_GCM_SHA256,
+                    provider::cipher_suite::TLS13_AES_128_GCM_SHA256,
                 ],
                 kx_groups: vec![provider::kx_group::SECP256R1, &ffdhe::FFDHE2048_KX_GROUP],
                 ..provider::default_provider()
             }
             .into(),
         )
-        .with_protocol_versions(&[&rustls::version::TLS12])
+        .with_safe_default_protocol_versions()
         .unwrap(),
     )
     .into();
@@ -5281,6 +5284,7 @@ fn test_server_avoids_cipher_suite_with_no_common_kx_groups() {
                 provider::kx_group::SECP256R1,
                 &ffdhe::FFDHE3072_KX_GROUP,
             ],
+            &TLS12,
             CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
         ),
         (
@@ -5289,11 +5293,30 @@ fn test_server_avoids_cipher_suite_with_no_common_kx_groups() {
                 // this matches:
                 &ffdhe::FFDHE2048_KX_GROUP,
             ],
+            &TLS12,
             CipherSuite::TLS_DHE_RSA_WITH_AES_128_GCM_SHA256,
+        ),
+        (
+            vec![
+                // this matches:
+                provider::kx_group::SECP256R1,
+                &ffdhe::FFDHE3072_KX_GROUP,
+            ],
+            &TLS13,
+            CipherSuite::TLS13_AES_128_GCM_SHA256,
+        ),
+        (
+            vec![
+                provider::kx_group::SECP384R1,
+                // this matches:
+                &ffdhe::FFDHE2048_KX_GROUP,
+            ],
+            &TLS13,
+            CipherSuite::TLS13_AES_128_GCM_SHA256,
         ),
     ];
 
-    for (client_kx_groups, expected_cipher_suite) in test_cases {
+    for (client_kx_groups, protocol_version, expected_cipher_suite) in test_cases {
         let client_config = finish_client_config(
             KeyType::Rsa,
             rustls::ClientConfig::builder_with_provider(
@@ -5301,13 +5324,14 @@ fn test_server_avoids_cipher_suite_with_no_common_kx_groups() {
                     cipher_suites: vec![
                         provider::cipher_suite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
                         ffdhe::TLS_DHE_RSA_WITH_AES_128_GCM_SHA256,
+                        provider::cipher_suite::TLS13_AES_128_GCM_SHA256,
                     ],
                     kx_groups: client_kx_groups,
                     ..provider::default_provider()
                 }
                 .into(),
             )
-            .with_protocol_versions(&[&rustls::version::TLS12])
+            .with_protocol_versions(&[protocol_version])
             .unwrap(),
         )
         .into();
@@ -5322,6 +5346,7 @@ fn test_server_avoids_cipher_suite_with_no_common_kx_groups() {
                 .suite(),
             expected_cipher_suite
         );
+        assert_eq!(server.protocol_version(), Some(protocol_version.version));
     }
 }
 

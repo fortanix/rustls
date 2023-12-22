@@ -43,7 +43,7 @@ fn verify_openssl3_available() {
     }
 }
 
-/// Get FFDHE parameters `(p, g)`` for the given `ffdhe_group` from OpenSSL
+/// Get FFDHE parameters `(p, g)` for the given `ffdhe_group` from OpenSSL
 fn get_ffdhe_params_from_openssl(ffdhe_group: NamedGroup) -> (Vec<u8>, Vec<u8>) {
     let group = match ffdhe_group {
         NamedGroup::FFDHE2048 => "group:ffdhe2048",

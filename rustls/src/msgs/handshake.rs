@@ -1522,6 +1522,11 @@ impl Codec for EcParameters {
     }
 }
 
+pub(crate) trait KxDecode: fmt::Debug + Sized {
+    /// Decode a key exchange message given the key_exchange `algo`
+    fn decode(r: &mut Reader, algo: KeyExchangeAlgorithm) -> Result<Self, InvalidMessage>;
+}
+
 #[derive(Debug)]
 pub(crate) enum ClientKeyExchangeParams {
     Ecdh(ClientEcdhParams),
@@ -1668,10 +1673,6 @@ impl Codec for ServerDhParams {
     }
 }
 
-pub(crate) trait KxDecode: fmt::Debug + Sized {
-    fn decode(r: &mut Reader, algo: KeyExchangeAlgorithm) -> Result<Self, InvalidMessage>;
-}
-
 #[derive(Debug)]
 pub(crate) enum ServerKeyExchangeParams {
     Ecdh(ServerEcdhParams),
@@ -1702,9 +1703,7 @@ impl ServerKeyExchangeParams {
             Self::Dh(dh) => dh.encode(buf),
         }
     }
-}
 
-impl ServerKeyExchangeParams {
     #[cfg(feature = "tls12")]
     pub(crate) fn named_group(&self) -> Option<NamedGroup> {
         match self {
@@ -1720,46 +1719,6 @@ impl KxDecode for ServerKeyExchangeParams {
             KeyExchangeAlgorithm::ECDHE => Codec::read(r).map(Self::Ecdh),
             KeyExchangeAlgorithm::DHE => Codec::read(r).map(Self::Dh),
         }
-    }
-}
-
-#[derive(Debug)]
-pub(crate) struct EcdheServerKeyExchange {
-    pub(crate) params: ServerEcdhParams,
-    pub(crate) dss: DigitallySignedStruct,
-}
-
-impl Codec for EcdheServerKeyExchange {
-    fn encode(&self, bytes: &mut Vec<u8>) {
-        self.params.encode(bytes);
-        self.dss.encode(bytes);
-    }
-
-    fn read(r: &mut Reader) -> Result<Self, InvalidMessage> {
-        let params = ServerEcdhParams::read(r)?;
-        let dss = DigitallySignedStruct::read(r)?;
-
-        Ok(Self { params, dss })
-    }
-}
-
-#[derive(Debug)]
-pub(crate) struct DheServerKeyExchange {
-    pub(crate) params: ServerDhParams,
-    pub(crate) dss: DigitallySignedStruct,
-}
-
-impl Codec for DheServerKeyExchange {
-    fn encode(&self, bytes: &mut Vec<u8>) {
-        self.params.encode(bytes);
-        self.dss.encode(bytes);
-    }
-
-    fn read(r: &mut Reader) -> Result<Self, InvalidMessage> {
-        let params = ServerDhParams::read(r)?;
-        let dss = DigitallySignedStruct::read(r)?;
-
-        Ok(Self { params, dss })
     }
 }
 
@@ -1809,16 +1768,8 @@ impl ServerKeyExchangePayload {
         if let Self::Unknown(ref unk) = *self {
             let mut rd = Reader::init(&unk.0);
 
-            let server_kx_params = match kxa {
-                KeyExchangeAlgorithm::ECDHE => {
-                    ServerKeyExchangeParams::Ecdh(ServerEcdhParams::read(&mut rd).ok()?)
-                }
-                KeyExchangeAlgorithm::DHE => {
-                    ServerKeyExchangeParams::Dh(ServerDhParams::read(&mut rd).ok()?)
-                }
-            };
             let result = ServerKeyExchange {
-                params: server_kx_params,
+                params: ServerKeyExchangeParams::decode(&mut rd, kxa).ok()?,
                 dss: DigitallySignedStruct::read(&mut rd).ok()?,
             };
 
