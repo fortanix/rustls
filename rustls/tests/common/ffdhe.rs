@@ -48,12 +48,14 @@ impl SupportedKxGroup for FfdheKxGroup {
         let g = BigUint::from_bytes_be(group.g);
 
         let x_pub = g.modpow(&x, &p);
+        let x_pub = to_bytes_be_with_len(x_pub, group.p.len());
 
         Ok(Box::new(ActiveFfdheKx {
-            x_pub: x_pub.to_bytes_be(),
+            x_pub,
             x,
             p,
-            group: self.0,
+            group,
+            named_group: self.0,
         }))
     }
 
@@ -66,15 +68,17 @@ struct ActiveFfdheKx {
     x_pub: Vec<u8>,
     x: BigUint,
     p: BigUint,
-    group: NamedGroup,
+    group: FfdheGroup<'static>,
+    named_group: NamedGroup,
 }
 
 impl ActiveKeyExchange for ActiveFfdheKx {
     fn complete(self: Box<Self>, peer_pub_key: &[u8]) -> Result<SharedSecret, rustls::Error> {
         let peer_pub = BigUint::from_bytes_be(peer_pub_key);
         let secret = peer_pub.modpow(&self.x, &self.p);
+        let secret = to_bytes_be_with_len(secret, self.group.p.len());
 
-        Ok(SharedSecret::from(&secret.to_bytes_be()[..]))
+        Ok(SharedSecret::from(&secret[..]))
     }
 
     fn pub_key(&self) -> &[u8] {
@@ -82,8 +86,15 @@ impl ActiveKeyExchange for ActiveFfdheKx {
     }
 
     fn group(&self) -> NamedGroup {
-        self.group
+        self.named_group
     }
+}
+
+fn to_bytes_be_with_len(n: BigUint, len_bytes: usize) -> Vec<u8> {
+    let mut bytes = n.to_bytes_le();
+    bytes.resize(len_bytes, 0);
+    bytes.reverse();
+    bytes
 }
 
 pub const FFDHE2048_KX_GROUP: FfdheKxGroup = FfdheKxGroup(NamedGroup::FFDHE2048);
