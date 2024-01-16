@@ -315,6 +315,10 @@ pub struct ServerConfig {
     /// If this is 0, no tickets are sent and clients will not be able to
     /// do any resumption.
     pub send_tls13_tickets: usize,
+
+    /// Whether require client to always send "extended_master_secret" extension
+    #[cfg(feature = "tls12")]
+    pub force_using_ems: bool,
 }
 
 // Avoid a `Clone` bound on `C`.
@@ -335,6 +339,8 @@ impl Clone for ServerConfig {
             max_early_data_size: self.max_early_data_size,
             send_half_rtt_data: self.send_half_rtt_data,
             send_tls13_tickets: self.send_tls13_tickets,
+            #[cfg(feature = "tls12")]
+            force_using_ems: self.force_using_ems,
         }
     }
 }
