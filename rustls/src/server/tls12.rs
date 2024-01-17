@@ -99,15 +99,6 @@ mod client_hello {
             }
             let ecpoints_ext = client_hello.get_ecpoints_extension();
 
-            // TODO: according to the ECC RFC, sending this extension is not required
-            // https://datatracker.ietf.org/doc/html/rfc8422#section-5.1.2
-            if ecpoints_ext.is_none() && self.suite.kx == KeyExchangeAlgorithm::ECDHE {
-                return Err(cx.common.send_fatal_alert(
-                    AlertDescription::HandshakeFailure,
-                    PeerIncompatible::EcPointsExtensionRequired,
-                ));
-            }
-
             trace!("namedgroups {:?}", groups_ext);
             trace!("ecpoints {:?}", ecpoints_ext);
 
