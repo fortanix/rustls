@@ -5061,7 +5061,8 @@ fn test_client_rejects_illegal_tls13_ccs() {
 fn remove_ems_request(msg: &mut Message) -> Altered {
     if let MessagePayload::Handshake { parsed, encoded } = &mut msg.payload {
         if let HandshakePayload::ClientHello(ch) = &mut parsed.payload {
-            ch.extensions.retain(|ext| !matches!(ext, ClientExtension::ExtendedMasterSecretRequest) )
+            ch.extensions
+                .retain(|ext| !matches!(ext, ClientExtension::ExtendedMasterSecretRequest))
         }
 
         *encoded = Payload::new(parsed.get_encoding());
