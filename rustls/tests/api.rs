@@ -5061,13 +5061,7 @@ fn test_client_rejects_illegal_tls13_ccs() {
 fn remove_ems_request(msg: &mut Message) -> Altered {
     if let MessagePayload::Handshake { parsed, encoded } = &mut msg.payload {
         if let HandshakePayload::ClientHello(ch) = &mut parsed.payload {
-            ch.extensions.retain(|ext| {
-                if let ClientExtension::ExtendedMasterSecretRequest = ext {
-                    false
-                } else {
-                    true
-                }
-            })
+            ch.extensions.retain(|ext| !matches!(ext, ClientExtension::ExtendedMasterSecretRequest) )
         }
 
         *encoded = Payload::new(parsed.get_encoding());
@@ -5081,7 +5075,7 @@ fn remove_ems_request(msg: &mut Message) -> Altered {
 fn test_client_rejects_no_extended_master_secret_extension_when_force_using_ems() {
     let key_type = KeyType::Rsa;
     let mut client_config = make_client_config(key_type);
-    client_config.force_using_ems = true;
+    client_config.require_ems = true;
     let server_config = finish_server_config(
         key_type,
         server_config_builder_with_versions(&[&rustls::version::TLS12]),
@@ -5108,7 +5102,7 @@ fn test_server_rejects_no_extended_master_secret_extension_when_force_using_ems(
         key_type,
         server_config_builder_with_versions(&[&rustls::version::TLS12]),
     );
-    server_config.force_using_ems = true;
+    server_config.require_ems = true;
     let (client, server) = make_pair_for_configs(client_config, server_config);
     let (mut client, mut server) = (client.into(), server.into());
     transfer_altered(&mut client, remove_ems_request, &mut server);
