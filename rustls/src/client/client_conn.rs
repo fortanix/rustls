@@ -316,6 +316,7 @@ impl Clone for ClientConfig {
             key_log: Arc::clone(&self.key_log),
             enable_secret_extraction: self.enable_secret_extraction,
             enable_early_data: self.enable_early_data,
+            #[cfg(feature = "tls12")]
             require_ems: self.require_ems,
         }
     }
