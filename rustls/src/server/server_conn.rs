@@ -316,9 +316,13 @@ pub struct ServerConfig {
     /// do any resumption.
     pub send_tls13_tickets: usize,
 
-    /// Whether require client to always send "extended_master_secret" extension
+    /// If set to `true`, requires the client to support the extended
+    /// master secret extraction method defined in [RFC 7627].
+    /// The default is `false`.
+    ///
+    /// [RFC 7627]: https://datatracker.ietf.org/doc/html/rfc7627
     #[cfg(feature = "tls12")]
-    pub force_using_ems: bool,
+    pub require_ems: bool,
 }
 
 // Avoid a `Clone` bound on `C`.
@@ -340,7 +344,7 @@ impl Clone for ServerConfig {
             send_half_rtt_data: self.send_half_rtt_data,
             send_tls13_tickets: self.send_tls13_tickets,
             #[cfg(feature = "tls12")]
-            force_using_ems: self.force_using_ems,
+            require_ems: self.require_ems,
         }
     }
 }

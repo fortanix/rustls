@@ -404,7 +404,7 @@ impl ExpectClientHello {
             .handle_client_hello(cx, certkey, m, client_hello, sig_schemes),
             #[cfg(feature = "tls12")]
             SupportedCipherSuite::Tls12(suite) => {
-                let force_using_ems = self.config.force_using_ems;
+                let force_using_ems = self.config.require_ems;
                 tls12::CompleteClientHelloHandling {
                     config: self.config,
                     transcript,

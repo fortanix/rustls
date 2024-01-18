@@ -193,9 +193,13 @@ pub struct ClientConfig {
     /// The default is false.
     pub enable_early_data: bool,
 
-    /// Whether to ensure "extended_master_secret" extension is used.
+    /// If set to `true`, requires the server to support the extended
+    /// master secret extraction method defined in [RFC 7627].
+    /// The default is `false`.
+    ///
+    /// [RFC 7627]: https://datatracker.ietf.org/doc/html/rfc7627
     #[cfg(feature = "tls12")]
-    pub force_using_ems: bool,
+    pub require_ems: bool,
 
     /// Source of randomness and other crypto.
     pub(super) provider: Arc<CryptoProvider>,
@@ -312,7 +316,7 @@ impl Clone for ClientConfig {
             key_log: Arc::clone(&self.key_log),
             enable_secret_extraction: self.enable_secret_extraction,
             enable_early_data: self.enable_early_data,
-            force_using_ems: self.force_using_ems,
+            require_ems: self.require_ems,
         }
     }
 }

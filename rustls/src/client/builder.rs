@@ -160,7 +160,7 @@ impl ConfigBuilder<ClientConfig, WantsClientCert> {
             enable_secret_extraction: false,
             enable_early_data: false,
             #[cfg(feature = "tls12")]
-            force_using_ems: false,
+            require_ems: false,
         }
     }
 }

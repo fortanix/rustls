@@ -81,7 +81,7 @@ mod server_hello {
 
             // Doing EMS?
             self.using_ems = server_hello.ems_support_acked();
-            if self.config.force_using_ems && !self.using_ems {
+            if self.config.require_ems && !self.using_ems {
                 return Err({
                     cx.common.send_fatal_alert(
                         AlertDescription::HandshakeFailure,
