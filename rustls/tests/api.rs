@@ -21,7 +21,7 @@ use rustls::internal::msgs::handshake::{
     ServerExtension, ServerName as ServerNameExtensionItem, SessionId,
 };
 use rustls::internal::msgs::message::{Message, MessagePayload, PlainMessage};
-use rustls::server::{ClientHello, ParsedCertificate, ResolvesServerCert};
+use rustls::server::{ClientHello, InvalidSniPolicy, ParsedCertificate, ResolvesServerCert};
 #[cfg(feature = "aws_lc_rs")]
 use rustls::{
     client::{EchConfig, EchGreaseConfig, EchMode},
@@ -1490,6 +1490,82 @@ fn server_rejects_sni_with_illegal_dns_name() {
     );
 }
 
+#[test]
+fn server_invalid_sni_policy() {
+    const SERVER_NAME_GOOD: &str = "LXXXxxxXXXR";
+    const SERVER_NAME_BAAD: &str = "[XXXxxxXXX]";
+    const SERVER_NAME_IPV4: &str = "10.11.12.13";
+
+    fn replace_sni(sni_replacement: &str) -> impl Fn(&mut Message) -> Altered + '_ {
+        assert_eq!(sni_replacement.len(), SERVER_NAME_GOOD.len());
+        move |m: &mut Message| {
+            alter_sni_extension(
+                m,
+                |_| (),
+                |_parsed, encoded| {
+                    let mut payload_bytes = encoded.bytes().to_vec();
+                    if let Some(ind) = payload_bytes
+                        .windows(SERVER_NAME_GOOD.len())
+                        .position(|w| w == SERVER_NAME_GOOD.as_bytes())
+                    {
+                        payload_bytes[ind..][..SERVER_NAME_GOOD.len()]
+                            .copy_from_slice(sni_replacement.as_bytes());
+                    }
+
+                    Payload::new(payload_bytes)
+                },
+            )
+        }
+    }
+
+    enum ExpectedResult {
+        Accept,
+        AcceptNoSni,
+        Reject,
+    }
+    use ExpectedResult::*;
+    use InvalidSniPolicy as Policy;
+    let test_cases = [
+        (Policy::RejectAll, SERVER_NAME_GOOD, Accept),
+        (Policy::RejectAll, SERVER_NAME_IPV4, Reject),
+        (Policy::IgnoreAll, SERVER_NAME_GOOD, Accept),
+        (Policy::IgnoreAll, SERVER_NAME_IPV4, AcceptNoSni),
+        (Policy::IgnoreAll, SERVER_NAME_BAAD, AcceptNoSni),
+        (Policy::IgnoreIpAddresses, SERVER_NAME_GOOD, Accept),
+        (Policy::IgnoreIpAddresses, SERVER_NAME_IPV4, AcceptNoSni),
+        (Policy::IgnoreIpAddresses, SERVER_NAME_BAAD, Reject),
+    ];
+
+    let accept_result = Err(Error::General(
+        "no server certificate chain resolved".to_string(),
+    ));
+    let reject_result = Err(Error::InvalidMessage(InvalidMessage::InvalidServerName));
+
+    for (policy, sni, expected_result) in test_cases {
+        let client_config = make_client_config(KeyType::EcdsaP256);
+        let mut server_config = make_server_config(KeyType::EcdsaP256);
+
+        server_config.cert_resolver = Arc::new(ServerCheckSni {
+            expect_sni: matches!(expected_result, ExpectedResult::Accept),
+        });
+        server_config.invalid_sni_policy = policy;
+
+        let client =
+            ClientConnection::new(Arc::new(client_config), server_name(SERVER_NAME_GOOD)).unwrap();
+        let server = ServerConnection::new(Arc::new(server_config)).unwrap();
+        let (mut client, mut server) = (client.into(), server.into());
+
+        transfer_altered(&mut client, replace_sni(sni), &mut server);
+        assert_eq!(
+            &server.process_new_packets(),
+            match expected_result {
+                Accept | AcceptNoSni => &accept_result,
+                Reject => &reject_result,
+            }
+        );
+    }
+}
+
 fn alter_sni_extension(
     msg: &mut Message,
     alter_inner: impl Fn(&mut Vec<ServerNameExtensionItem>),
@@ -1514,7 +1590,7 @@ fn check_sni_error(alteration: impl Fn(&mut Message) -> Altered, expected_error:
         let client_config = make_client_config(*kt);
         let mut server_config = make_server_config(*kt);
 
-        server_config.cert_resolver = Arc::new(ServerCheckNoSni {});
+        server_config.cert_resolver = Arc::new(ServerCheckSni { expect_sni: false });
 
         let client =
             ClientConnection::new(Arc::new(client_config), server_name("localhost")).unwrap();
@@ -1607,11 +1683,13 @@ fn server_cert_resolve_reduces_sigalgs_for_ecdsa_ciphersuite() {
 }
 
 #[derive(Debug)]
-struct ServerCheckNoSni {}
+struct ServerCheckSni {
+    expect_sni: bool,
+}
 
-impl ResolvesServerCert for ServerCheckNoSni {
+impl ResolvesServerCert for ServerCheckSni {
     fn resolve(&self, client_hello: ClientHello) -> Option<Arc<sign::CertifiedKey>> {
-        assert!(client_hello.server_name().is_none());
+        assert_eq!(client_hello.server_name().is_some(), self.expect_sni);
 
         None
     }
@@ -1621,7 +1699,7 @@ impl ResolvesServerCert for ServerCheckNoSni {
 fn client_with_sni_disabled_does_not_send_sni() {
     for kt in ALL_KEY_TYPES {
         let mut server_config = make_server_config(*kt);
-        server_config.cert_resolver = Arc::new(ServerCheckNoSni {});
+        server_config.cert_resolver = Arc::new(ServerCheckSni { expect_sni: false });
         let server_config = Arc::new(server_config);
 
         for version in rustls::ALL_VERSIONS {

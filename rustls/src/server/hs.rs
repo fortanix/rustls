@@ -29,7 +29,7 @@ use crate::msgs::persist;
 use crate::server::common::ActiveCertifiedKey;
 use crate::server::{tls13, ClientHello, ServerConfig};
 use crate::sync::Arc;
-use crate::{suites, SupportedCipherSuite};
+use crate::{suites, InvalidMessage, SupportedCipherSuite};
 
 pub(super) type NextState<'a> = Box<dyn State<ServerConnectionData> + 'a>;
 pub(super) type NextStateOrError<'a> = Result<NextState<'a>, Error>;
@@ -132,8 +132,12 @@ impl ExtensionProcessing {
         }
 
         let for_resume = resumedata.is_some();
-        // SNI
-        if !for_resume && hello.sni_extension().is_some() {
+        // SNI. Only acknowledge if it is valid
+        if !for_resume
+            && hello
+                .sni_extension()
+                .is_some_and(|sni| sni.any_invalid().is_none())
+        {
             self.exts
                 .push(ServerExtension::ServerNameAck);
         }
@@ -341,6 +345,17 @@ impl ExpectClientHello {
         let tls12_enabled = self
             .config
             .supports_version(ProtocolVersion::TLSv1_2);
+
+        if !self
+            .config
+            .invalid_sni_policy
+            .is_acceptable(client_hello)
+        {
+            return Err(cx.common.send_fatal_alert(
+                AlertDescription::IllegalParameter,
+                InvalidMessage::InvalidServerName,
+            ));
+        }
 
         // Are we doing TLS1.3?
         let maybe_versions_ext = client_hello.versions_extension();
@@ -695,10 +710,10 @@ pub(super) fn process_client_hello<'m>(
     cx.common.check_aligned_handshake()?;
 
     // Extract and validate the SNI DNS name, if any, before giving it to
-    // the cert resolver. In particular, if it is invalid then we should
-    // send an Illegal Parameter alert instead of the Internal Error alert
-    // (or whatever) that we'd send if this were checked later or in a
-    // different way.
+    // the cert resolver. If the DNS name is invalid (e.g., it's an IP address,
+    // or it contains invalid characters), we don't set it on the context, but
+    // we don't immediately return an error either, as dealing with invalid SNIs
+    // is subject to `InvalidSniPolicy` configured on the server.
     let sni: Option<DnsName<'_>> = match client_hello.sni_extension() {
         Some(sni) => {
             if sni.has_duplicate_names_for_type() {
@@ -708,14 +723,15 @@ pub(super) fn process_client_hello<'m>(
                 ));
             }
 
-            if let Some(hostname) = sni.single_hostname() {
-                Some(hostname.to_lowercase_owned())
-            } else {
+            if sni.is_empty() {
                 return Err(cx.common.send_fatal_alert(
                     AlertDescription::IllegalParameter,
                     PeerMisbehaved::ServerNameMustContainOneHostName,
                 ));
             }
+
+            sni.single_hostname()
+                .map(|hostname| hostname.to_lowercase_owned())
         }
         None => None,
     };
