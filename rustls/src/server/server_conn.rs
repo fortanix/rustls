@@ -20,10 +20,12 @@ use crate::crypto;
 use crate::crypto::CryptoProvider;
 use crate::enums::{CipherSuite, ProtocolVersion, SignatureScheme};
 use crate::error::Error;
-use crate::log::trace;
+use crate::log::{debug, trace};
 use crate::msgs::base::Payload;
 use crate::msgs::enums::CertificateType;
-use crate::msgs::handshake::{ClientHelloPayload, ProtocolName, ServerExtension};
+use crate::msgs::handshake::{
+    ClientHelloPayload, ConvertServerNameList, ProtocolName, ServerExtension,
+};
 use crate::msgs::message::Message;
 use crate::sync::Arc;
 #[cfg(feature = "std")]
@@ -217,6 +219,53 @@ impl<'a> ClientHello<'a> {
     }
 }
 
+/// This Policy determines how invalid SNI should be handled by the rustls server.
+///
+/// The only valid form of SNI according to relevant RFCs ([RFC6066], [RFC1035]) is
+/// non-IP-address HostNames.
+///
+/// [RFC1035]: https://datatracker.ietf.org/doc/html/rfc1035#section-2.3.1
+/// [RFC6066]: https://datatracker.ietf.org/doc/html/rfc6066#section-3
+#[derive(Default, Clone, Copy, PartialEq, Eq, Debug)]
+#[non_exhaustive]
+pub enum InvalidSniPolicy {
+    /// Reject all ClientHello messages that contain invalid SNI
+    RejectAll,
+    /// Ignore SNI in ClientHello messages if they are IP addresses.
+    ///
+    /// "Ignoring SNI" means accepting the ClientHello message, but acting as if the client sent no SNI.
+    #[default]
+    IgnoreIpAddresses,
+    /// Ignore all invalid SNI in ClientHello messages.
+    ///
+    /// "Ignoring SNI" means accepting the ClientHello message, but acting as if the client sent no SNI.
+    IgnoreAll,
+}
+
+impl InvalidSniPolicy {
+    /// Check if any potential invalid SNI in ClientHello is acceptable (i.e., ignorable)
+    /// by this policy.
+    ///
+    /// A `false` return value means there is an invalid SNI in ClientHello that is
+    /// rejected by this policy.
+    pub(super) fn is_acceptable(&self, client_hello: &ClientHelloPayload) -> bool {
+        let maybe_bad_sni = client_hello
+            .sni_extension()
+            .and_then(|sni| match self {
+                Self::RejectAll => sni.any_invalid(),
+                Self::IgnoreIpAddresses => sni.any_unknown(),
+                Self::IgnoreAll => None,
+            });
+        if let Some(_bad_sni) = maybe_bad_sni {
+            debug!(
+                "Invalid SNI {:?} is rejected by InvalidSniPolicy {self:?}",
+                alloc::string::String::from_utf8_lossy(_bad_sni)
+            );
+        }
+        maybe_bad_sni.is_none()
+    }
+}
+
 /// Common configuration for a set of server sessions.
 ///
 /// Making one of these is cheap, though one of the inputs may be expensive: gathering trust roots
@@ -390,6 +439,9 @@ pub struct ServerConfig {
     ///
     /// [RFC8779]: https://datatracker.ietf.org/doc/rfc8879/
     pub cert_decompressors: Vec<&'static dyn compress::CertDecompressor>,
+
+    /// Determines how invalid SNI in ClientHello is handled.
+    pub invalid_sni_policy: InvalidSniPolicy,
 }
 
 impl ServerConfig {

@@ -242,7 +242,7 @@ impl ServerNamePayload {
                     "Illegal SNI hostname received {:?}",
                     String::from_utf8_lossy(&raw.0)
                 );
-                Err(InvalidMessage::InvalidServerName)
+                Ok(Self::Unknown(Payload::Owned(raw.0)))
             }
         }
     }
@@ -290,6 +290,12 @@ impl TlsListElement for ServerName {
 pub(crate) trait ConvertServerNameList {
     fn has_duplicate_names_for_type(&self) -> bool;
     fn single_hostname(&self) -> Option<DnsName<'_>>;
+    fn any_ip_addr(&self) -> Option<&[u8]>;
+    fn any_unknown(&self) -> Option<&[u8]>;
+    fn any_invalid(&self) -> Option<&[u8]> {
+        self.any_ip_addr()
+            .or_else(|| self.any_unknown())
+    }
 }
 
 impl ConvertServerNameList for [ServerName] {
@@ -310,6 +316,22 @@ impl ConvertServerNameList for [ServerName] {
         self.iter()
             .filter_map(only_dns_hostnames)
             .next()
+    }
+
+    fn any_ip_addr(&self) -> Option<&[u8]> {
+        self.iter()
+            .find_map(|name| match &name.payload {
+                ServerNamePayload::IpAddress(ip_addr) => Some(&*ip_addr.0),
+                _ => None,
+            })
+    }
+
+    fn any_unknown(&self) -> Option<&[u8]> {
+        self.iter()
+            .find_map(|name| match &name.payload {
+                ServerNamePayload::Unknown(payload) => Some(payload.bytes()),
+                _ => None,
+            })
     }
 }
 
@@ -986,23 +1008,7 @@ impl ClientHelloPayload {
     pub(crate) fn sni_extension(&self) -> Option<&[ServerName]> {
         let ext = self.find_extension(ExtensionType::ServerName)?;
         match *ext {
-            // Does this comply with RFC6066?
-            //
-            // [RFC6066][] specifies that literal IP addresses are illegal in
-            // `ServerName`s with a `name_type` of `host_name`.
-            //
-            // Some clients incorrectly send such extensions: we choose to
-            // successfully parse these (into `ServerNamePayload::IpAddress`)
-            // but then act like the client sent no `server_name` extension.
-            //
-            // [RFC6066]: https://datatracker.ietf.org/doc/html/rfc6066#section-3
-            ClientExtension::ServerName(ref req)
-                if !req
-                    .iter()
-                    .any(|name| matches!(name.payload, ServerNamePayload::IpAddress(_))) =>
-            {
-                Some(req)
-            }
+            ClientExtension::ServerName(ref req) => Some(req),
             _ => None,
         }
     }

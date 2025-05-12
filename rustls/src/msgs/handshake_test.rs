@@ -255,8 +255,9 @@ fn rejects_truncated_sni() {
     let bytes = [0, 0, 0, 4, 0, 2, 0, 0];
     assert!(ClientExtension::read(&mut Reader::init(&bytes)).is_err());
 
-    let bytes = [0, 0, 0, 5, 0, 3, 0, 0, 0];
-    assert!(ClientExtension::read(&mut Reader::init(&bytes)).is_err());
+    // This is empty SNI (and not truncated)
+    // let bytes = [0, 0, 0, 5, 0, 3, 0, 0, 0];
+    // assert!(ClientExtension::read(&mut Reader::init(&bytes)).is_err());
 
     let bytes = [0, 0, 0, 5, 0, 3, 0, 0, 1];
     assert!(ClientExtension::read(&mut Reader::init(&bytes)).is_err());
