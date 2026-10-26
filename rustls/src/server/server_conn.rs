@@ -23,9 +23,11 @@ use crate::crypto::CryptoProvider;
 use crate::enums::{CertificateType, CipherSuite, ProtocolVersion, SignatureScheme};
 use crate::error::Error;
 use crate::kernel::KernelConnection;
-use crate::log::trace;
+use crate::log::{debug, trace};
 use crate::msgs::base::Payload;
-use crate::msgs::handshake::{ClientHelloPayload, ProtocolName, ServerExtensionsInput};
+use crate::msgs::handshake::{
+    ClientHelloPayload, ProtocolName, ServerExtensionsInput, ServerNamePayload,
+};
 use crate::msgs::message::Message;
 use crate::suites::ExtractedSecrets;
 use crate::sync::Arc;
@@ -242,6 +244,50 @@ impl<'a> ClientHello<'a> {
     }
 }
 
+/// This Policy determines how invalid SNI should be handled by the rustls server.
+///
+/// The only valid form of SNI according to relevant RFCs ([RFC6066], [RFC1035]) is
+/// non-IP-address HostNames.
+///
+/// [RFC1035]: https://datatracker.ietf.org/doc/html/rfc1035#section-2.3.1
+/// [RFC6066]: https://datatracker.ietf.org/doc/html/rfc6066#section-3
+#[derive(Default, Clone, Copy, PartialEq, Eq, Debug)]
+#[non_exhaustive]
+pub enum InvalidSniPolicy {
+    /// Reject all ClientHello messages that contain invalid SNI
+    RejectAll,
+    /// Ignore SNI in ClientHello messages if they are IP addresses.
+    ///
+    /// "Ignoring SNI" means accepting the ClientHello message, but acting as if the client sent no SNI.
+    #[default]
+    IgnoreIpAddresses,
+    /// Ignore all invalid SNI in ClientHello messages.
+    ///
+    /// "Ignoring SNI" means accepting the ClientHello message, but acting as if the client sent no SNI.
+    IgnoreAll,
+}
+
+impl InvalidSniPolicy {
+    /// Check if any potential invalid SNI in ClientHello is acceptable (i.e., ignorable)
+    /// by this policy.
+    ///
+    /// A `false` return value means there is an invalid SNI in ClientHello that is
+    /// rejected by this policy.
+    pub(super) fn is_acceptable(&self, client_hello: &ClientHelloPayload) -> bool {
+        let rejected = match &client_hello.server_name {
+            // IP literals are illegal in host_name (RFC6066) but common in practice.
+            Some(ServerNamePayload::IpAddress) => matches!(self, Self::RejectAll),
+            // Other non-hostname values are syntactically invalid.
+            Some(ServerNamePayload::Invalid) => !matches!(self, Self::IgnoreAll),
+            Some(ServerNamePayload::SingleDnsName(_)) | None => false,
+        };
+        if rejected {
+            debug!("invalid SNI rejected by InvalidSniPolicy {self:?}");
+        }
+        !rejected
+    }
+}
+
 /// Common configuration for a set of server sessions.
 ///
 /// Making one of these is cheap, though one of the inputs may be expensive: gathering trust roots
@@ -265,6 +311,7 @@ impl<'a> ClientHello<'a> {
 /// * [`ServerConfig::cert_compressors`]: depends on the crate features, see [`compress::default_cert_compressors()`].
 /// * [`ServerConfig::cert_compression_cache`]: caches the most recently used 4 compressions
 /// * [`ServerConfig::cert_decompressors`]: depends on the crate features, see [`compress::default_cert_decompressors()`].
+/// * [`ServerConfig::invalid_sni_policy`][]: [`InvalidSniPolicy::IgnoreIpAddresses`].
 ///
 /// # Sharing resumption storage between `ServerConfig`s
 ///
@@ -459,6 +506,9 @@ pub struct ServerConfig {
     ///
     /// [RFC8779]: https://datatracker.ietf.org/doc/rfc8879/
     pub cert_decompressors: Vec<&'static dyn compress::CertDecompressor>,
+
+    /// Determines how invalid SNI in ClientHello is handled.
+    pub invalid_sni_policy: InvalidSniPolicy,
 }
 
 impl ServerConfig {

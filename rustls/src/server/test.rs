@@ -11,7 +11,7 @@ use crate::msgs::handshake::{
     Random, ServerNamePayload, SessionId, SupportedProtocolVersions,
 };
 use crate::msgs::message::{Message, MessagePayload};
-use crate::{CommonState, Error, PeerIncompatible, PeerMisbehaved, ProtocolVersion, Side};
+use crate::{CommonState, Error, PeerIncompatible, ProtocolVersion, Side};
 
 #[test]
 fn null_compression_required() {
@@ -33,14 +33,13 @@ fn server_ignores_sni_with_ip_address() {
 }
 
 #[test]
-fn server_rejects_sni_with_illegal_dns_name() {
+fn server_defers_illegal_sni_until_policy() {
+    // `process_client_hello` has no `ServerConfig`, so it cannot apply
+    // `InvalidSniPolicy`. Illegal names are treated as "no SNI" here and
+    // rejected later if the selected policy says so.
     let mut ch = minimal_client_hello();
     ch.extensions.server_name = Some(ServerNamePayload::Invalid);
-    std::println!("{:?}", ch.extensions);
-    assert_eq!(
-        test_process_client_hello(ch),
-        Err(PeerMisbehaved::ServerNameMustContainOneHostName.into())
-    );
+    assert_eq!(test_process_client_hello(ch), Ok(()));
 }
 
 fn test_process_client_hello(hello: ClientHelloPayload) -> Result<(), Error> {
@@ -85,7 +84,8 @@ mod tests {
     use crate::sync::Arc;
     use crate::tls13::key_schedule::KeyScheduleEarly;
     use crate::{
-        CipherSuiteCommon, SupportedCipherSuite, Tls12CipherSuite, Tls13CipherSuite, version,
+        CipherSuiteCommon, PeerMisbehaved, SupportedCipherSuite, Tls12CipherSuite,
+        Tls13CipherSuite, version,
     };
 
     #[cfg(feature = "tls12")]

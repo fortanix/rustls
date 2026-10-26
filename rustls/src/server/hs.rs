@@ -14,7 +14,7 @@ use crate::enums::{
     AlertDescription, CertificateType, CipherSuite, HandshakeType, ProtocolVersion,
     SignatureAlgorithm, SignatureScheme,
 };
-use crate::error::{Error, PeerIncompatible, PeerMisbehaved};
+use crate::error::{Error, InvalidMessage, PeerIncompatible, PeerMisbehaved};
 use crate::hash_hs::{HandshakeHash, HandshakeHashBuffer};
 use crate::log::{debug, trace};
 use crate::msgs::enums::{Compression, ExtensionType, NamedGroup};
@@ -153,7 +153,9 @@ impl ExtensionProcessing {
         }
 
         let for_resume = resumedata.is_some();
-        // SNI
+        // Acknowledge SNI only when it is a real hostname. Invalid values are
+        // either ignored or rejected by `InvalidSniPolicy`, and in both cases
+        // the server does not confirm an SNI it did not accept.
         if let (false, Some(ServerNamePayload::SingleDnsName(_))) = (for_resume, &hello.server_name)
         {
             self.extensions.server_name_ack = Some(());
@@ -356,6 +358,17 @@ impl ExpectClientHello {
             .config
             .supports_version(ProtocolVersion::TLSv1_2, cx.common.protocol)
             && !self.previous_hello.is_some();
+
+        if !self
+            .config
+            .invalid_sni_policy
+            .is_acceptable(client_hello)
+        {
+            return Err(cx.common.send_fatal_alert(
+                AlertDescription::IllegalParameter,
+                InvalidMessage::InvalidServerName,
+            ));
+        }
 
         // Are we doing TLS1.3?
         let version = if let Some(versions) = &client_hello.supported_versions {
@@ -730,30 +743,19 @@ pub(super) fn process_client_hello<'m>(
     // No handshake messages should follow this one in this flight.
     cx.common.check_aligned_handshake()?;
 
-    // Extract and validate the SNI DNS name, if any, before giving it to
-    // the cert resolver. In particular, if it is invalid then we should
-    // send an Illegal Parameter alert instead of the Internal Error alert
-    // (or whatever) that we'd send if this were checked later or in a
-    // different way.
+    // Extract a usable SNI DNS name, if any, before giving it to the cert
+    // resolver. IP addresses and syntactically invalid hostnames are not
+    // stored. Rejection is config-dependent (`InvalidSniPolicy`) and happens
+    // once a `ServerConfig` is available, so this step stays config-free for
+    // `Acceptor`.
     //
     // [RFC6066][] specifies that literal IP addresses are illegal in
     // `ServerName`s with a `name_type` of `host_name`.
     //
-    // Some clients incorrectly send such extensions: we choose to
-    // successfully parse these (into `ServerNamePayload::IpAddress`)
-    // but then act like the client sent no `server_name` extension.
-    //
     // [RFC6066]: https://datatracker.ietf.org/doc/html/rfc6066#section-3
     let sni = match &client_hello.server_name {
         Some(ServerNamePayload::SingleDnsName(dns_name)) => Some(dns_name.to_lowercase_owned()),
-        Some(ServerNamePayload::IpAddress) => None,
-        Some(ServerNamePayload::Invalid) => {
-            return Err(cx.common.send_fatal_alert(
-                AlertDescription::IllegalParameter,
-                PeerMisbehaved::ServerNameMustContainOneHostName,
-            ));
-        }
-        None => None,
+        Some(ServerNamePayload::IpAddress | ServerNamePayload::Invalid) | None => None,
     };
 
     // save only the first SNI

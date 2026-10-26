@@ -26,7 +26,7 @@ use rustls::internal::msgs::codec::Codec;
 use rustls::internal::msgs::enums::{AlertLevel, ExtensionType};
 use rustls::internal::msgs::message::{Message, MessagePayload, PlainMessage};
 use rustls::server::{
-    Acceptor, CertificateType, ClientHello, ParsedCertificate, ResolvesServerCert,
+    Acceptor, CertificateType, ClientHello, InvalidSniPolicy, ParsedCertificate, ResolvesServerCert,
 };
 use rustls::{
     AlertDescription, CertificateError, CipherSuite, ClientConfig, ClientConnection,
@@ -1451,6 +1451,81 @@ fn client_trims_terminating_dot() {
     }
 }
 
+#[test]
+fn server_invalid_sni_policy() {
+    const SERVER_NAME_GOOD: &str = "example.com";
+    const SERVER_NAME_BAAD: &str = "[XXXxxxXXX]";
+    const SERVER_NAME_IPV4: &str = "10.11.12.13";
+    fn replace_sni(sni_replacement: &'static str) -> impl Fn(&mut Message<'_>) -> Altered {
+        assert_eq!(sni_replacement.len(), SERVER_NAME_GOOD.len());
+        move |m: &mut Message<'_>| {
+            if !m.is_handshake_type(HandshakeType::ClientHello) {
+                return Altered::InPlace;
+            }
+
+            let mut payload = Vec::new();
+            m.payload.encode(&mut payload);
+            let needle = SERVER_NAME_GOOD.as_bytes();
+            let ind = payload
+                .windows(needle.len())
+                .position(|window| window == needle)
+                .expect("SNI hostname missing from ClientHello");
+            payload[ind..ind + needle.len()].copy_from_slice(sni_replacement.as_bytes());
+
+            let plain = PlainMessage {
+                typ: m.payload.content_type(),
+                version: m.version,
+                payload: Payload::Owned(payload),
+            };
+            Altered::Raw(plain.into_unencrypted_opaque().encode())
+        }
+    }
+
+    enum ExpectedResult {
+        Accept,
+        AcceptNoSni,
+        Reject,
+    }
+    use ExpectedResult::*;
+    use InvalidSniPolicy as Policy;
+    let test_cases = [
+        (Policy::RejectAll, SERVER_NAME_GOOD, Accept),
+        (Policy::RejectAll, SERVER_NAME_IPV4, Reject),
+        (Policy::IgnoreAll, SERVER_NAME_GOOD, Accept),
+        (Policy::IgnoreAll, SERVER_NAME_IPV4, AcceptNoSni),
+        (Policy::IgnoreAll, SERVER_NAME_BAAD, AcceptNoSni),
+        (Policy::IgnoreIpAddresses, SERVER_NAME_GOOD, Accept),
+        (Policy::IgnoreIpAddresses, SERVER_NAME_IPV4, AcceptNoSni),
+        (Policy::IgnoreIpAddresses, SERVER_NAME_BAAD, Reject),
+    ];
+
+    let provider = provider::default_provider();
+    for (policy, sni, expected_result) in test_cases {
+        let client_config = make_client_config(KeyType::EcdsaP256, &provider);
+        let mut server_config = make_server_config(KeyType::EcdsaP256, &provider);
+
+        server_config.cert_resolver = Arc::new(ServerCheckSni {
+            expect_sni: matches!(expected_result, ExpectedResult::Accept),
+        });
+        server_config.invalid_sni_policy = policy;
+
+        let client =
+            ClientConnection::new(Arc::new(client_config), server_name(SERVER_NAME_GOOD)).unwrap();
+        let server = ServerConnection::new(Arc::new(server_config)).unwrap();
+
+        let err = do_handshake_altered(client, |_| Altered::InPlace, replace_sni(sni), server);
+        let expected = match expected_result {
+            Accept | AcceptNoSni => ErrorFromPeer::Server(Error::General(
+                "no server certificate chain resolved".to_string(),
+            )),
+            Reject => {
+                ErrorFromPeer::Server(Error::InvalidMessage(InvalidMessage::InvalidServerName))
+            }
+        };
+        assert_eq!(err, Err(expected));
+    }
+}
+
 #[cfg(feature = "tls12")]
 fn check_sigalgs_reduced_by_ciphersuite(
     kt: KeyType,
@@ -1527,11 +1602,13 @@ fn server_cert_resolve_reduces_sigalgs_for_ecdsa_ciphersuite() {
 }
 
 #[derive(Debug)]
-struct ServerCheckNoSni {}
+struct ServerCheckSni {
+    expect_sni: bool,
+}
 
-impl ResolvesServerCert for ServerCheckNoSni {
+impl ResolvesServerCert for ServerCheckSni {
     fn resolve(&self, client_hello: ClientHello) -> Option<Arc<sign::CertifiedKey>> {
-        assert!(client_hello.server_name().is_none());
+        assert_eq!(client_hello.server_name().is_some(), self.expect_sni);
 
         None
     }
@@ -1542,7 +1619,7 @@ fn client_with_sni_disabled_does_not_send_sni() {
     let provider = provider::default_provider();
     for kt in KeyType::all_for_provider(&provider) {
         let mut server_config = make_server_config(*kt, &provider);
-        server_config.cert_resolver = Arc::new(ServerCheckNoSni {});
+        server_config.cert_resolver = Arc::new(ServerCheckSni { expect_sni: false });
         let server_config = Arc::new(server_config);
 
         for version in rustls::ALL_VERSIONS {
